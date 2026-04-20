@@ -27,11 +27,11 @@ function getLocalDayMonth(tz: string): { day: number; month: number } {
   };
 }
 
-// top 20% cutoff: smallest value such that 80% of values are below it
-function top20Threshold(values: number[]): number {
+// top 80% cutoff: smallest value such that 20% of values are below it
+function topThreshold(values: number[], threshold: number): number {
   if (values.length === 0) return Infinity;
   const sorted = [...values].sort((a, b) => a - b);
-  const idx = Math.ceil(0.8 * sorted.length) - 1;
+  const idx = Math.ceil(threshold * sorted.length) - 1;
   return sorted[Math.max(0, idx)];
 }
 
@@ -61,9 +61,9 @@ export function setupScheduler(bot: Bot): void {
     }
   }, { timezone: TIMEZONE });
 
-  // Meme forwarding: every 3 hours
-  cron.schedule('0 */3 * * *', async () => {
-    const cutoff = Math.floor(Date.now() / 1000 - 3600 * 6);
+  // Meme forwarding: every 6 hours
+  cron.schedule('0 */6 * * *', async () => {
+    const cutoff = Math.floor(Date.now() / 1000 - 3600 * 24); // last 24 hours
     const chats = stmtGetChatsWithChannel.all() as ChatSettingsRow[];
 
     for (const { chat_id, meme_channel_id } of chats) {
@@ -71,22 +71,22 @@ export function setupScheduler(bot: Bot): void {
       if (memes.length === 0) continue;
 
       const counts = memes.map(m => m.reaction_count);
-      const threshold = top20Threshold(counts);
+      const threshold = topThreshold(counts, 0.4);
       logger.info(`[memes] chat ${chat_id}: ${memes.length} pending, threshold=${threshold}`);
 
       for (const meme of memes) {
         const shouldForward = meme.reaction_count > 0 && meme.reaction_count >= threshold;
+        logger.info(`[memes] meme ${meme.message_id}: reactions=${meme.reaction_count}, shouldForward=${shouldForward}`);
         if (shouldForward) {
           try {
             await bot.api.forwardMessage(meme_channel_id, chat_id, meme.message_id);
             stmtMarkMeme.run(1, meme.id);
+            logger.info(`[memes] forwarded ${meme.message_id} to ${meme_channel_id}`);
           } catch (e) {
             logger.error(`[memes] failed to forward ${meme.message_id} from ${chat_id}: ${e}`);
-            stmtMarkMeme.run(-1, meme.id);
+            // Keep as pending for retry
           }
-        } else {
-          stmtMarkMeme.run(-1, meme.id);
-        }
+        } // else keep as pending for next check
       }
     }
   });
