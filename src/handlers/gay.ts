@@ -1,5 +1,5 @@
 import { Context, InlineKeyboard, InlineQueryResultBuilder } from 'grammy';
-import { stmtGetGayScore, stmtUpsertGayScore } from '../database';
+import { stmtGetGayScore, stmtUpsertGayScore, stmtGetReactionRanking } from '../database';
 
 const TIMEZONE = process.env.TIMEZONE || 'Europe/Moscow';
 
@@ -71,4 +71,61 @@ export async function handleGayInlineQuery(ctx: Context): Promise<void> {
       description: `${value.toFixed(2)}% гей сегодня`,
     }).text(text, { parse_mode: 'Markdown' }),
   ], { cache_time: 0 });
+}
+
+export async function handleGayRating(ctx: Context): Promise<void> {
+  const chat = ctx.chat;
+  if (!chat) return;
+
+  const rankings = stmtGetReactionRanking.all(chat.id) as { user_id: number; total_reactions: number }[];
+
+  if (rankings.length === 0) {
+    await ctx.reply('Пока нет реакций на сообщения в этом чате. 😔');
+    return;
+  }
+
+  const topReactions = rankings[0].total_reactions;
+  const users: { id: number; name: string; percentage: number; total: number }[] = [];
+
+  for (const rank of rankings) {
+    try {
+      const member = await ctx.api.getChatMember(chat.id, rank.user_id);
+      const name = member.user.username ? `@${member.user.username}` : member.user.first_name;
+      const percentage = topReactions > 0 ? Math.round((rank.total_reactions / topReactions) * 100) : 0;
+      users.push({ id: rank.user_id, name, percentage, total: rank.total_reactions });
+    } catch (error) {
+      // If can't get member, skip or use ID
+      const name = `User ${rank.user_id}`;
+      const percentage = topReactions > 0 ? Math.round((rank.total_reactions / topReactions) * 100) : 0;
+      users.push({ id: rank.user_id, name, percentage, total: rank.total_reactions });
+    }
+  }
+
+  // Chief
+  const chief = users[0];
+  let text = `Рейтинг гейства нашего королевства -\n\n`;
+  if (chief) {
+    text += `Chief Gay Officer - ${chief.name} (${chief.total})\n\n`;
+  }
+
+  // Categories
+  const categories = [
+    { name: 'Senior Gay\'s', min: 80, max: 100 },
+    { name: 'Middle Gay\'s', min: 50, max: 79 },
+    { name: 'Junior Gay\'s', min: 10, max: 49 },
+    { name: 'Trainee gay\'s', min: 0, max: 9 },
+  ];
+
+  for (const cat of categories) {
+    const filtered = users.filter(u => u.percentage >= cat.min && u.percentage <= cat.max && u.id !== chief?.id);
+    if (filtered.length > 0) {
+      text += `${cat.name}:\n`;
+      filtered.forEach((u, idx) => {
+        text += `${idx + 1}. ${u.name} (${u.percentage}%)\n`;
+      });
+      text += '\n';
+    }
+  }
+
+  await ctx.reply(text.trim());
 }
