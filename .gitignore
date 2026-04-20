@@ -5,3 +5,4 @@ bot.db-shm
 bot.log
 node_modules
 dist
+.vscode

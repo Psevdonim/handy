@@ -172,7 +172,7 @@ export const stmtDeltaReactionCount = db.prepare(
 );
 
 export const stmtGetPendingMemes = db.prepare(
-  'SELECT id, message_id, reaction_count FROM memes WHERE chat_id = ? AND forwarded = 0 AND posted_at <= ?'
+  'SELECT id, message_id, reaction_count FROM memes WHERE chat_id = ? AND forwarded = 0 AND posted_at >= ?'
 );
 
 export const stmtMarkMeme = db.prepare(

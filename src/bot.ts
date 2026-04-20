@@ -47,15 +47,30 @@ bot.catch((err) => {
 
 setupScheduler(bot);
 
-bot.api.setMyCommands([
-  { command: 'birthday',        description: 'Дни рождения — set/list/delete/test' },
-  { command: 'weather',         description: 'Погода в городах — add/remove/list' },
-  { command: 'random',          description: 'Случайный выбор из вариантов' },
-  { command: 'dicky',           description: 'Игра в см — roll/raise/top/config' },
-  { command: 'how_many_im_gay', description: 'Насколько ты гей сегодня?' },
-  { command: 'gay_rating',      description: 'Рейтинг гейства по реакциям' },
-  { command: 'todo',           description: 'Список задач' },
-]).catch((e) => logger.error('[setMyCommands]', e));
+async function setCommandsWithRetry(bot: Bot, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await bot.api.setMyCommands([
+        { command: 'birthday',        description: 'Дни рождения — set/list/delete/test' },
+        { command: 'weather',         description: 'Погода в городах — add/remove/list' },
+        { command: 'random',          description: 'Случайный выбор из вариантов' },
+        { command: 'dicky',           description: 'Игра в см — roll/raise/top/config' },
+        { command: 'how_many_im_gay', description: 'Насколько ты гей сегодня?' },
+        { command: 'gay_rating',      description: 'Рейтинг гейства по реакциям' },
+        { command: 'todo',           description: 'Список задач' },
+      ]);
+      return;
+    } catch (e) {
+      logger.error(`[setMyCommands] attempt ${i + 1} failed:`, e);
+      if (i < retries - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1))); // exponential backoff
+      }
+    }
+  }
+  logger.error('[setMyCommands] all retries failed');
+}
+
+setCommandsWithRetry(bot);
 
 bot.start({
   allowed_updates: [
