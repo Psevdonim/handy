@@ -5,7 +5,7 @@ import { handleMemeMessage, handleReaction, handleReactionCount, handleSetMemeCh
 import { handleWeather } from './handlers/weather';
 import { handleRandom } from './handlers/random';
 import { handleDickyGame, setupGameCallbacks } from './handlers/dicky-game';
-import { handleGay, handleGayInlineQuery } from './handlers/gay';
+import { handleGay, handleGayInlineQuery, handleGayRating } from './handlers/gay';
 import { handleTodo, handleTodoTextInput, setupTodoCallbacks } from './handlers/todo';
 import { setupScheduler } from './scheduler';
 import logger from './logger';
@@ -22,6 +22,7 @@ bot.command('weather', handleWeather);
 bot.command('random', handleRandom);
 bot.command('dicky', handleDickyGame);
 bot.command('how_many_im_gay', handleGay);
+bot.command('gay_rating', handleGayRating);
 bot.command('todo', handleTodo);
 
 setupGameCallbacks(bot);
@@ -52,6 +53,7 @@ bot.api.setMyCommands([
   { command: 'random',          description: 'Случайный выбор из вариантов' },
   { command: 'dicky',           description: 'Игра в см — roll/raise/top/config' },
   { command: 'how_many_im_gay', description: 'Насколько ты гей сегодня?' },
+  { command: 'gay_rating',      description: 'Рейтинг гейства по реакциям' },
   { command: 'todo',           description: 'Список задач' },
 ]).catch((e) => logger.error('[setMyCommands]', e));
 

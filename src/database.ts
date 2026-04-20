@@ -179,6 +179,15 @@ export const stmtMarkMeme = db.prepare(
   'UPDATE memes SET forwarded = ? WHERE id = ?'
 );
 
+export const stmtGetReactionRanking = db.prepare(`
+  SELECT user_id, SUM(reaction_count) as total_reactions
+  FROM memes
+  WHERE chat_id = ?
+  GROUP BY user_id
+  ORDER BY total_reactions DESC
+  LIMIT 20
+`);
+
 // ── Chat settings ──────────────────────────────────────────────────────────
 
 export const stmtSetMemeChannel = db.prepare(`

@@ -4,3 +4,4 @@ bot.db-wal
 bot.db-shm
 bot.log
 node_modules
+dist
