@@ -3,6 +3,8 @@ import {
   stmtAddMeme,
   stmtSetReactionCount,
   stmtDeltaReactionCount,
+  stmtSetReactionCountByChannel,
+  stmtDeltaReactionCountByChannel,
   stmtSetMemeChannel,
   stmtGetMemeChannel,
 } from '../database';
@@ -19,6 +21,7 @@ export async function handleReactionCount(ctx: Context): Promise<void> {
   if (!upd) return;
   const total = upd.reactions.reduce((s, r) => s + r.total_count, 0);
   stmtSetReactionCount.run(total, upd.chat.id, upd.message_id);
+  stmtSetReactionCountByChannel.run(total, upd.message_id, upd.chat.id);
 }
 
 // Individual reaction changes (regular groups)
@@ -26,7 +29,10 @@ export async function handleReaction(ctx: Context): Promise<void> {
   const upd = ctx.update.message_reaction;
   if (!upd) return;
   const delta = upd.new_reaction.length - upd.old_reaction.length;
-  if (delta !== 0) stmtDeltaReactionCount.run(delta, upd.chat.id, upd.message_id);
+  if (delta !== 0) {
+    stmtDeltaReactionCount.run(delta, upd.chat.id, upd.message_id);
+    stmtDeltaReactionCountByChannel.run(delta, upd.message_id, upd.chat.id);
+  }
 }
 
 export async function handleSetMemeChannel(ctx: Context): Promise<void> {
