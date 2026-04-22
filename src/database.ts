@@ -207,7 +207,7 @@ export const stmtGetReactionRanking = db.prepare(`
   WHERE chat_id = ?
   GROUP BY user_id
   ORDER BY total_reactions DESC
-  LIMIT 20
+  LIMIT 500
 `);
 
 // ── Chat settings ──────────────────────────────────────────────────────────

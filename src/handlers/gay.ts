@@ -90,7 +90,7 @@ export async function handleGayRating(ctx: Context): Promise<void> {
   for (const rank of rankings) {
     try {
       const member = await ctx.api.getChatMember(chat.id, rank.user_id);
-      const name = member.user.username ? `@${member.user.username}` : member.user.first_name;
+      const name = member.user.username ?? member.user.first_name;
       const percentage = topReactions > 0 ? Math.round((rank.total_reactions / topReactions) * 100) : 0;
       users.push({ id: rank.user_id, name, percentage, total: rank.total_reactions });
     } catch (error) {
