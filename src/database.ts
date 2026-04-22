@@ -6,6 +6,12 @@ dotenv.config();
 const db = new Database(process.env.DATABASE_PATH || 'bot.db');
 db.pragma('journal_mode = WAL');
 
+// Migrate memes: add channel_message_id if missing
+const memeCols = db.prepare("PRAGMA table_info(memes)").all() as { name: string }[];
+if (memeCols.length > 0 && !memeCols.some(c => c.name === 'channel_message_id')) {
+  db.exec('ALTER TABLE memes ADD COLUMN channel_message_id INTEGER');
+}
+
 // Migrate gay_scores: drop old per-chat schema if it exists
 const gayScolumns = db.prepare("PRAGMA table_info(gay_scores)").all() as { name: string }[];
 if (gayScolumns.some(c => c.name === 'chat_id')) {
@@ -178,6 +184,22 @@ export const stmtGetPendingMemes = db.prepare(
 export const stmtMarkMeme = db.prepare(
   'UPDATE memes SET forwarded = ? WHERE id = ?'
 );
+
+export const stmtSetChannelMessageId = db.prepare(
+  'UPDATE memes SET channel_message_id = ? WHERE id = ?'
+);
+
+export const stmtSetReactionCountByChannel = db.prepare(`
+  UPDATE memes SET reaction_count = ?
+  WHERE channel_message_id = ?
+    AND EXISTS (SELECT 1 FROM chat_settings WHERE meme_channel_id = ? AND chat_id = memes.chat_id)
+`);
+
+export const stmtDeltaReactionCountByChannel = db.prepare(`
+  UPDATE memes SET reaction_count = MAX(0, reaction_count + ?)
+  WHERE channel_message_id = ?
+    AND EXISTS (SELECT 1 FROM chat_settings WHERE meme_channel_id = ? AND chat_id = memes.chat_id)
+`);
 
 export const stmtGetReactionRanking = db.prepare(`
   SELECT user_id, SUM(reaction_count) as total_reactions

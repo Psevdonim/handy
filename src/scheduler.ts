@@ -6,6 +6,7 @@ import {
   stmtGetChatsWithChannel,
   stmtGetPendingMemes,
   stmtMarkMeme,
+  stmtSetChannelMessageId,
   BirthdayRow,
   MemeRow,
   ChatSettingsRow,
@@ -79,7 +80,8 @@ export function setupScheduler(bot: Bot): void {
         logger.info(`[memes] meme ${meme.message_id}: reactions=${meme.reaction_count}, shouldForward=${shouldForward}`);
         if (shouldForward) {
           try {
-            await bot.api.forwardMessage(meme_channel_id, chat_id, meme.message_id);
+            const forwarded = await bot.api.forwardMessage(meme_channel_id, chat_id, meme.message_id);
+            stmtSetChannelMessageId.run(forwarded.message_id, meme.id);
             stmtMarkMeme.run(1, meme.id);
             logger.info(`[memes] forwarded ${meme.message_id} to ${meme_channel_id}`);
           } catch (e) {
