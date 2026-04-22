@@ -71,7 +71,7 @@ export function setupScheduler(bot: Bot): void {
       if (memes.length === 0) continue;
 
       const counts = memes.map(m => m.reaction_count);
-      const threshold = topThreshold(counts, 0.4);
+      const threshold = topThreshold(counts, 0.7);
       logger.info(`[memes] chat ${chat_id}: ${memes.length} pending, threshold=${threshold}`);
 
       for (const meme of memes) {
