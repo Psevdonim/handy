@@ -1,7 +1,7 @@
 import { Api, Bot, Context, InlineKeyboard } from 'grammy';
 import {
   stmtCreateTodoList,
-  stmtGetUserTodoLists,
+  stmtGetChatTodoLists,
   stmtGetTodoList,
   stmtDeleteTodoListItems,
   stmtDeleteTodoList,
@@ -18,7 +18,7 @@ interface TodoItem { id: number; text: string; done: number }
 
 type UserState =
   | { action: 'add_item'; listId: number; chatId: number; msgId: number }
-  | { action: 'new_list'; chatId: number; userId: number; msgId: number };
+  | { action: 'new_list'; chatId: number; msgId: number };
 
 export const userTodoStates = new Map<number, UserState>();
 
@@ -30,12 +30,12 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
 
-function ensureActiveList(userId: number, chatId: number): number {
-  const row = stmtGetActiveTodoListId.get(userId, chatId) as { list_id: number } | undefined;
+function ensureActiveList(chatId: number, isPrivate = false): number {
+  const row = stmtGetActiveTodoListId.get(chatId) as { list_id: number } | undefined;
   if (row) return row.list_id;
-  const res = stmtCreateTodoList.run(chatId, userId, 'Мои задачи');
+  const res = stmtCreateTodoList.run(chatId, isPrivate ? 'Мои задачи' : 'Общий список');
   const listId = res.lastInsertRowid as number;
-  stmtSetActiveTodoList.run(userId, chatId, listId);
+  stmtSetActiveTodoList.run(chatId, listId);
   return listId;
 }
 
@@ -67,7 +67,7 @@ function buildMainKeyboard(items: TodoItem[]): InlineKeyboard {
 }
 
 function buildListsText(lists: TodoList[], activeId: number): string {
-  let text = `📚 <b>Мои списки</b>\n\n`;
+  let text = `📚 <b>Списки чата</b>\n\n`;
   text += lists.map(l => (l.id === activeId ? `• <b>${esc(l.name)}</b> ✓` : `• ${esc(l.name)}`)).join('\n');
   return text;
 }
@@ -85,8 +85,8 @@ function buildListsKeyboard(lists: TodoList[], activeId: number): InlineKeyboard
   return kb;
 }
 
-async function renderMain(api: Api, chatId: number, userId: number, msgId: number): Promise<void> {
-  const listId = ensureActiveList(userId, chatId);
+async function renderMain(api: Api, chatId: number, msgId: number): Promise<void> {
+  const listId = ensureActiveList(chatId);
   const list = stmtGetTodoList.get(listId) as TodoList;
   const items = stmtGetTodoItems.all(listId) as TodoItem[];
   try {
@@ -100,10 +100,12 @@ async function renderMain(api: Api, chatId: number, userId: number, msgId: numbe
 // ── Command ────────────────────────────────────────────────────────────────
 
 export async function handleTodo(ctx: Context): Promise<void> {
-  const user = ctx.from;
   const chat = ctx.chat;
-  if (!user || !chat) return;
-  const listId = ensureActiveList(user.id, chat.id);
+  const user = ctx.from;
+  if (!user) return;
+  const chatId = chat?.id ?? user.id;
+  const isPrivate = !chat || chat.type === 'private';
+  const listId = ensureActiveList(chatId, isPrivate);
   const list = stmtGetTodoList.get(listId) as TodoList;
   const items = stmtGetTodoItems.all(listId) as TodoItem[];
   await ctx.reply(buildMainText(list, items), {
@@ -112,7 +114,7 @@ export async function handleTodo(ctx: Context): Promise<void> {
   });
 }
 
-// ── Text input handler (add item / new list name) ──────────────────────────
+// ── Text input handler ─────────────────────────────────────────────────────
 
 export async function handleTodoTextInput(ctx: Context): Promise<void> {
   const user = ctx.from;
@@ -131,11 +133,11 @@ export async function handleTodoTextInput(ctx: Context): Promise<void> {
       .map(s => s.charAt(0).toUpperCase() + s.slice(1));
     for (const item of items) stmtAddTodoItem.run(state.listId, item);
   } else if (state.action === 'new_list') {
-    const res = stmtCreateTodoList.run(state.chatId, state.userId, text);
-    stmtSetActiveTodoList.run(state.userId, state.chatId, res.lastInsertRowid as number);
+    const res = stmtCreateTodoList.run(state.chatId, text);
+    stmtSetActiveTodoList.run(state.chatId, res.lastInsertRowid as number);
   }
 
-  await renderMain(ctx.api, state.chatId, user.id, state.msgId);
+  await renderMain(ctx.api, state.chatId, state.msgId);
 }
 
 // ── Callbacks ──────────────────────────────────────────────────────────────
@@ -143,19 +145,19 @@ export async function handleTodoTextInput(ctx: Context): Promise<void> {
 export function setupTodoCallbacks(bot: Bot): void {
   bot.callbackQuery(/^td_toggle:(\d+)$/, async (ctx) => {
     stmtToggleTodoItem.run(parseInt(ctx.match[1]));
-    await renderMain(ctx.api, ctx.chat!.id, ctx.from.id, ctx.callbackQuery.message!.message_id);
+    await renderMain(ctx.api, ctx.chat!.id, ctx.callbackQuery.message!.message_id);
     return ctx.answerCallbackQuery();
   });
 
   bot.callbackQuery(/^td_del:(\d+)$/, async (ctx) => {
     stmtDeleteTodoItem.run(parseInt(ctx.match[1]));
-    await renderMain(ctx.api, ctx.chat!.id, ctx.from.id, ctx.callbackQuery.message!.message_id);
+    await renderMain(ctx.api, ctx.chat!.id, ctx.callbackQuery.message!.message_id);
     return ctx.answerCallbackQuery({ text: '🗑 Удалено' });
   });
 
   bot.callbackQuery('td_add', async (ctx) => {
     const chatId = ctx.chat!.id;
-    const listId = ensureActiveList(ctx.from.id, chatId);
+    const listId = ensureActiveList(chatId);
     const msgId = ctx.callbackQuery.message!.message_id;
     userTodoStates.set(ctx.from.id, { action: 'add_item', listId, chatId, msgId });
     await ctx.api.editMessageText(chatId, msgId,
@@ -167,14 +169,14 @@ export function setupTodoCallbacks(bot: Bot): void {
 
   bot.callbackQuery('td_cancel', async (ctx) => {
     userTodoStates.delete(ctx.from.id);
-    await renderMain(ctx.api, ctx.chat!.id, ctx.from.id, ctx.callbackQuery.message!.message_id);
+    await renderMain(ctx.api, ctx.chat!.id, ctx.callbackQuery.message!.message_id);
     return ctx.answerCallbackQuery();
   });
 
   bot.callbackQuery('td_lists', async (ctx) => {
     const chatId = ctx.chat!.id;
-    const activeId = ensureActiveList(ctx.from.id, chatId);
-    const lists = stmtGetUserTodoLists.all(chatId, ctx.from.id) as TodoList[];
+    const activeId = ensureActiveList(chatId);
+    const lists = stmtGetChatTodoLists.all(chatId) as TodoList[];
     await ctx.api.editMessageText(chatId, ctx.callbackQuery.message!.message_id,
       buildListsText(lists, activeId),
       { parse_mode: 'HTML', reply_markup: buildListsKeyboard(lists, activeId) }
@@ -183,30 +185,29 @@ export function setupTodoCallbacks(bot: Bot): void {
   });
 
   bot.callbackQuery(/^td_switch:(\d+)$/, async (ctx) => {
-    const listId = parseInt(ctx.match[1]);
-    stmtSetActiveTodoList.run(ctx.from.id, ctx.chat!.id, listId);
-    await renderMain(ctx.api, ctx.chat!.id, ctx.from.id, ctx.callbackQuery.message!.message_id);
+    stmtSetActiveTodoList.run(ctx.chat!.id, parseInt(ctx.match[1]));
+    await renderMain(ctx.api, ctx.chat!.id, ctx.callbackQuery.message!.message_id);
     return ctx.answerCallbackQuery();
   });
 
   bot.callbackQuery(/^td_dellist:(\d+)$/, async (ctx) => {
     const chatId = ctx.chat!.id;
     const listId = parseInt(ctx.match[1]);
-    const lists = stmtGetUserTodoLists.all(chatId, ctx.from.id) as TodoList[];
+    const lists = stmtGetChatTodoLists.all(chatId) as TodoList[];
     if (lists.length <= 1)
       return ctx.answerCallbackQuery({ text: 'Нельзя удалить последний список!', show_alert: true });
 
     stmtDeleteTodoListItems.run(listId);
-    stmtDeleteTodoList.run(listId, ctx.from.id);
+    stmtDeleteTodoList.run(listId);
 
-    const activeRow = stmtGetActiveTodoListId.get(ctx.from.id, chatId) as { list_id: number } | undefined;
+    const activeRow = stmtGetActiveTodoListId.get(chatId) as { list_id: number } | undefined;
     if (!activeRow || activeRow.list_id === listId) {
-      const remaining = stmtGetUserTodoLists.all(chatId, ctx.from.id) as TodoList[];
-      if (remaining.length > 0) stmtSetActiveTodoList.run(ctx.from.id, chatId, remaining[0].id);
+      const remaining = stmtGetChatTodoLists.all(chatId) as TodoList[];
+      if (remaining.length > 0) stmtSetActiveTodoList.run(chatId, remaining[0].id);
     }
 
-    const newActiveId = ensureActiveList(ctx.from.id, chatId);
-    const updatedLists = stmtGetUserTodoLists.all(chatId, ctx.from.id) as TodoList[];
+    const newActiveId = ensureActiveList(chatId);
+    const updatedLists = stmtGetChatTodoLists.all(chatId) as TodoList[];
     await ctx.api.editMessageText(chatId, ctx.callbackQuery.message!.message_id,
       buildListsText(updatedLists, newActiveId),
       { parse_mode: 'HTML', reply_markup: buildListsKeyboard(updatedLists, newActiveId) }
@@ -217,7 +218,7 @@ export function setupTodoCallbacks(bot: Bot): void {
   bot.callbackQuery('td_newlist', async (ctx) => {
     const chatId = ctx.chat!.id;
     const msgId = ctx.callbackQuery.message!.message_id;
-    userTodoStates.set(ctx.from.id, { action: 'new_list', chatId, userId: ctx.from.id, msgId });
+    userTodoStates.set(ctx.from.id, { action: 'new_list', chatId, msgId });
     await ctx.api.editMessageText(chatId, msgId,
       '📋 <b>Новый список</b>\n\nНапиши название:',
       { parse_mode: 'HTML', reply_markup: new InlineKeyboard().text('✕ Отмена', 'td_cancel') }
@@ -226,7 +227,7 @@ export function setupTodoCallbacks(bot: Bot): void {
   });
 
   bot.callbackQuery('td_back', async (ctx) => {
-    await renderMain(ctx.api, ctx.chat!.id, ctx.from.id, ctx.callbackQuery.message!.message_id);
+    await renderMain(ctx.api, ctx.chat!.id, ctx.callbackQuery.message!.message_id);
     return ctx.answerCallbackQuery();
   });
 }

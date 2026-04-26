@@ -18,16 +18,37 @@ if (gayScolumns.some(c => c.name === 'chat_id')) {
   db.exec('DROP TABLE gay_scores');
 }
 
-// Migrate todo_lists/todo_active: add chat_id if missing
+// Migrate todo_lists: remove user_id column, preserve existing data
+const todoListCols = db.prepare("PRAGMA table_info(todo_lists)").all() as { name: string }[];
+if (todoListCols.length > 0 && todoListCols.some(c => c.name === 'user_id')) {
+  db.exec(`
+    CREATE TABLE todo_lists_new (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id    INTEGER NOT NULL,
+      name       TEXT    NOT NULL,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+    INSERT INTO todo_lists_new (id, chat_id, name, created_at)
+      SELECT id, chat_id, name, created_at FROM todo_lists;
+
+    CREATE TABLE todo_active_new (
+      chat_id INTEGER PRIMARY KEY,
+      list_id INTEGER NOT NULL
+    );
+    INSERT OR IGNORE INTO todo_active_new (chat_id, list_id)
+      SELECT chat_id, list_id FROM todo_active GROUP BY chat_id;
+
+    DROP TABLE todo_active;
+    DROP TABLE todo_lists;
+    ALTER TABLE todo_lists_new RENAME TO todo_lists;
+    ALTER TABLE todo_active_new RENAME TO todo_active;
+  `);
+}
+
 // Migrate birthdays: add is_external column if missing
 const birthdayCols = db.prepare("PRAGMA table_info(birthdays)").all() as { name: string }[];
 if (birthdayCols.length > 0 && !birthdayCols.some(c => c.name === 'is_external')) {
   db.exec("ALTER TABLE birthdays ADD COLUMN is_external INTEGER NOT NULL DEFAULT 0");
-}
-
-const todoListCols = db.prepare("PRAGMA table_info(todo_lists)").all() as { name: string }[];
-if (todoListCols.length > 0 && !todoListCols.some(c => c.name === 'chat_id')) {
-  db.exec('DROP TABLE IF EXISTS todo_active; DROP TABLE IF EXISTS todo_items; DROP TABLE IF EXISTS todo_lists;');
 }
 
 db.exec(`
@@ -89,7 +110,6 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS todo_lists (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id    INTEGER NOT NULL,
-    user_id    INTEGER NOT NULL,
     name       TEXT    NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
@@ -103,10 +123,8 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS todo_active (
-    user_id INTEGER NOT NULL,
-    chat_id INTEGER NOT NULL,
-    list_id INTEGER NOT NULL,
-    PRIMARY KEY (user_id, chat_id)
+    chat_id INTEGER PRIMARY KEY,
+    list_id INTEGER NOT NULL
   );
 
 `);
@@ -304,11 +322,11 @@ export const stmtUpsertGameConfig = db.prepare(`
 // ── Todo ───────────────────────────────────────────────────────────────────
 
 export const stmtCreateTodoList = db.prepare(
-  'INSERT INTO todo_lists (chat_id, user_id, name) VALUES (?, ?, ?)'
+  'INSERT INTO todo_lists (chat_id, name) VALUES (?, ?)'
 );
 
-export const stmtGetUserTodoLists = db.prepare(
-  'SELECT id, name FROM todo_lists WHERE chat_id = ? AND user_id = ? ORDER BY created_at'
+export const stmtGetChatTodoLists = db.prepare(
+  'SELECT id, name FROM todo_lists WHERE chat_id = ? ORDER BY created_at'
 );
 
 export const stmtGetTodoList = db.prepare(
@@ -320,16 +338,16 @@ export const stmtDeleteTodoListItems = db.prepare(
 );
 
 export const stmtDeleteTodoList = db.prepare(
-  'DELETE FROM todo_lists WHERE id = ? AND user_id = ?'
+  'DELETE FROM todo_lists WHERE id = ?'
 );
 
 export const stmtGetActiveTodoListId = db.prepare(
-  'SELECT list_id FROM todo_active WHERE user_id = ? AND chat_id = ?'
+  'SELECT list_id FROM todo_active WHERE chat_id = ?'
 );
 
 export const stmtSetActiveTodoList = db.prepare(`
-  INSERT INTO todo_active (user_id, chat_id, list_id) VALUES (?, ?, ?)
-  ON CONFLICT(user_id, chat_id) DO UPDATE SET list_id = excluded.list_id
+  INSERT INTO todo_active (chat_id, list_id) VALUES (?, ?)
+  ON CONFLICT(chat_id) DO UPDATE SET list_id = excluded.list_id
 `);
 
 export const stmtGetTodoItems = db.prepare(
